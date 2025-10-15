@@ -4,7 +4,7 @@ import librosa
 import soundfile as sf
 import noisereduce as nr
 import numpy as np
-from scipy.signal import butter, sosfilt, wiener, lfilter, iirnotch
+from scipy.signal import butter, sosfilt, lfilter, iirnotch
 from scipy.ndimage import gaussian_filter1d
 import os
 import tempfile
@@ -12,69 +12,49 @@ import tempfile
 app = FastAPI(title="Audio Cleaner API")
 
 def ultra_clean_piano(input_path, output_path):
-    """Pipeline optimisé pour netteté maximale"""
+    """Pipeline optimisé pour netteté maximale - VERSION RAPIDE"""
     
     print("🎹 Chargement de l'audio...")
-    y, sr = librosa.load(input_path, sr=None, mono=False)
+    # Charger directement en mono à 22050 Hz pour gagner du temps
+    y, sr = librosa.load(input_path, sr=22050, mono=True)
+    
+    print(f"⏱️ Durée audio: {len(y)/sr:.2f}s")
     
     # 1. NORMALISATION
     print("📊 Normalisation...")
     y = librosa.util.normalize(y)
     
-    # 2. RÉDUCTION DE BRUIT
+    # 2. RÉDUCTION DE BRUIT (version plus rapide)
     print("🔇 Réduction de bruit...")
     y = nr.reduce_noise(
         y=y, 
         sr=sr, 
-        prop_decrease=0.9,
-        stationary=False,
-        freq_mask_smooth_hz=500,
-        time_mask_smooth_ms=50
+        prop_decrease=0.85,  # Moins agressif = plus rapide
+        stationary=True,     # Plus rapide que False
+        n_fft=1024          # Réduit pour vitesse
     )
     
-    # 3. RÉDUCTION DE RÉVERB
-    print("💧 Réduction de réverb...")
-    y = wiener(y, mysize=None)
-    
-    D = librosa.stft(y)
-    D_magnitude = np.abs(D)
-    D_phase = np.angle(D)
-    
-    decay_factor = 0.7
-    for i in range(1, D_magnitude.shape[1]):
-        D_magnitude[:, i] = np.maximum(
-            D_magnitude[:, i], 
-            D_magnitude[:, i-1] * decay_factor
-        )
-    
-    D_clean = D_magnitude * np.exp(1j * D_phase)
-    y = librosa.istft(D_clean)
-    
-    # 4. FILTRAGE FRÉQUENTIEL
+    # 3. FILTRAGE FRÉQUENTIEL
     print("🎚️ Filtrage fréquentiel...")
     # High-pass: enlever rumble
-    sos = butter(6, 60, btype='highpass', fs=sr, output='sos')
+    sos = butter(4, 80, btype='highpass', fs=sr, output='sos')  # Ordre réduit de 6 à 4
     y = sosfilt(sos, y)
     
     # Low-pass: enlever sifflement
-    sos = butter(6, 8000, btype='lowpass', fs=sr, output='sos')
+    sos = butter(4, 7000, btype='lowpass', fs=sr, output='sos')
     y = sosfilt(sos, y)
     
-    # Notch filter (enlever hum 50Hz/60Hz)
-    b, a = iirnotch(50, 30, sr)
-    y = lfilter(b, a, y)
-    
-    # 5. ACCENTUATION DES ATTAQUES
+    # 4. ACCENTUATION DES ATTAQUES (version simplifiée)
     print("⚡ Accentuation des attaques...")
-    y_harmonic, y_percussive = librosa.effects.hpss(y, margin=2.0)
-    y = y_harmonic + (y_percussive * 1.5)
+    y_harmonic, y_percussive = librosa.effects.hpss(y, margin=1.5)  # margin réduit = plus rapide
+    y = y_harmonic + (y_percussive * 1.3)
     
-    # 6. GATE
+    # 5. GATE SIMPLIFIÉ (plus rapide)
     print("🚪 Application du gate...")
     rms = librosa.feature.rms(y=y, frame_length=2048, hop_length=512)[0]
     rms_db = librosa.amplitude_to_db(rms, ref=np.max)
     
-    gate_threshold = -45
+    gate_threshold = -40  # Moins agressif
     gate_mask = rms_db > gate_threshold
     gate_mask_interp = np.interp(
         np.arange(len(y)),
@@ -82,29 +62,18 @@ def ultra_clean_piano(input_path, output_path):
         gate_mask.astype(float)
     )
     
-    gate_mask_smooth = gaussian_filter1d(gate_mask_interp, sigma=100)
+    # Smoothing plus simple
+    gate_mask_smooth = gaussian_filter1d(gate_mask_interp, sigma=50)  # sigma réduit
     y = y * gate_mask_smooth
     
-    # 7. TRIM SILENCE
+    # 6. TRIM SILENCE
     print("✂️ Trim du silence...")
-    y, _ = librosa.effects.trim(y, top_db=35)
+    y, _ = librosa.effects.trim(y, top_db=30)
     
-    # 8. CONVERSION MONO
-    print("📻 Conversion mono...")
-    if y.ndim > 1:
-        y = librosa.to_mono(y)
-    
-    # 9. RESAMPLING
-    print("🔄 Resampling à 22050 Hz...")
-    target_sr = 22050
-    if sr != target_sr:
-        y = librosa.resample(y, orig_sr=sr, target_sr=target_sr)
-        sr = target_sr
-    
-    # 10. NORMALISATION FINALE
+    # 7. NORMALISATION FINALE
     print("✨ Normalisation finale...")
     y = librosa.util.normalize(y)
-    y = np.tanh(y * 1.2)
+    y = np.tanh(y * 1.1)
     y = librosa.util.normalize(y)
     
     # Sauvegarder
@@ -118,7 +87,7 @@ def ultra_clean_piano(input_path, output_path):
 def root():
     return {
         "message": "Audio Cleaner API 🎹",
-        "version": "1.0.0",
+        "version": "2.0.0 - Fast",
         "endpoints": {
             "/clean": "POST - Upload audio file to clean",
             "/health": "GET - Check API status"
@@ -134,6 +103,9 @@ async def clean_audio(file: UploadFile = File(...)):
     """
     Endpoint pour nettoyer un fichier audio
     """
+    import time
+    start_time = time.time()
+    
     # Vérifier le type de fichier
     allowed_extensions = [".mp3", ".wav", ".m4a", ".ogg"]
     file_ext = os.path.splitext(file.filename)[1].lower()
@@ -159,6 +131,9 @@ async def clean_audio(file: UploadFile = File(...)):
         # Traiter l'audio
         ultra_clean_piano(temp_input.name, temp_output.name)
         
+        elapsed = time.time() - start_time
+        print(f"⏱️ Temps de traitement: {elapsed:.2f}s")
+        
         # Renvoyer le fichier nettoyé
         return FileResponse(
             temp_output.name,
@@ -168,6 +143,8 @@ async def clean_audio(file: UploadFile = File(...)):
     
     except Exception as e:
         print(f"❌ Erreur: {str(e)}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Erreur de traitement: {str(e)}")
     
     finally:
