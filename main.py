@@ -126,9 +126,6 @@ def ultra_clean_piano(input_file, output_file):
 
 # UTILISATION
 if __name__ == "__main__":
-    input_file = "piano_tiktok.mp3"
-    output_file = "piano_ultra_clean.wav"
-    
-    ultra_clean_piano(input_file, output_file)
-    
-    print("\n🎯 Maintenant envoie 'piano_ultra_clean.wav' à Basic Pitch !")
+    import uvicorn
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
