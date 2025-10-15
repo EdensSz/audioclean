@@ -1,8 +1,14 @@
+from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi.responses import FileResponse
 import librosa
 import soundfile as sf
 import noisereduce as nr
 import numpy as np
 from scipy.signal import butter, sosfilt, wiener
+from scipy.ndimage import gaussian_filter1d
+from scipy.signal import iirnotch
+import os  # ✅ AJOUTE CETTE LIGNE SI ELLE MANQUE
+import tempfile
 
 def ultra_clean_piano(input_file, output_file):
     """
