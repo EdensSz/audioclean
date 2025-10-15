@@ -4,9 +4,8 @@ import librosa
 import soundfile as sf
 import noisereduce as nr
 import numpy as np
-from scipy.signal import butter, sosfilt, wiener
+from scipy.signal import butter, sosfilt, wiener, lfilter, iirnotch
 from scipy.ndimage import gaussian_filter1d
-from scipy.signal import iirnotch
 import os
 import tempfile
 
@@ -53,14 +52,17 @@ def ultra_clean_piano(input_path, output_path):
     
     # 4. FILTRAGE FRÉQUENTIEL
     print("🎚️ Filtrage fréquentiel...")
+    # High-pass: enlever rumble
     sos = butter(6, 60, btype='highpass', fs=sr, output='sos')
     y = sosfilt(sos, y)
     
+    # Low-pass: enlever sifflement
     sos = butter(6, 8000, btype='lowpass', fs=sr, output='sos')
     y = sosfilt(sos, y)
     
+    # Notch filter (enlever hum 50Hz/60Hz)
     b, a = iirnotch(50, 30, sr)
-    y = sosfilt([b], [a], y)
+    y = lfilter(b, a, y)
     
     # 5. ACCENTUATION DES ATTAQUES
     print("⚡ Accentuation des attaques...")
